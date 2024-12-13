@@ -1,273 +1,274 @@
 import tkinter as tk
-from tkinter import ttk
-from PIL import Image, ImageTk
-import cv2
-from test_image_generator import TestImageGenerator
+from tkinter import filedialog
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import matplotlib.pyplot as plt
+from skimage.io import imread
+from skimage.transform import AffineTransform, warp
 import numpy as np
 from datetime import datetime
 
 
-class ImageRegistrationApp:
-    def __init__(self, root, n_points=5):
+class ImageRegistrationTool:
+    def __init__(self, root):
         self.root = root
         self.root.title("Image Registration Tool")
-        self.n_points = n_points
 
-        # Frames
-        self.canvas_frame = tk.Frame(self.root)
-        self.canvas_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+        # Initialize variables
+        self.original_image = None
+        self.transformed_image = None
+        self.registered_image = None
+        self.fixed_points = []
+        self.moving_points = []
 
+        # State for zooming and panning
+        self.is_panning = False
+        self.pan_start = None
+        self.current_ax = None
+
+        # Layout
+        self.setup_ui()
+
+    def setup_ui(self):
+        # Frames for images
+        self.image_frame = tk.Frame(self.root)
+        self.image_frame.grid(row=0, column=0, columnspan=4, padx=10, pady=10)
+
+        # Canvas for displaying images
+        self.fig, self.axs = plt.subplots(1, 4, figsize=(16, 5))
+        self.axs[0].set_title("Original Image")
+        self.axs[1].set_title("Transformed Image")
+        self.axs[2].set_title("Registered Image")
+        self.axs[3].set_title("Superimposed Image")
+        self.canvas = FigureCanvasTkAgg(self.fig, self.image_frame)
+        self.canvas.get_tk_widget().pack()
+
+        # Register click, zoom, and pan events
+        self.cid_original = self.fig.canvas.mpl_connect('button_press_event', self.on_click)
+        self.cid_zoom = self.fig.canvas.mpl_connect('scroll_event', self.on_zoom)
+        self.cid_pan_press = self.fig.canvas.mpl_connect('button_press_event', self.on_pan_press)
+        self.cid_pan_release = self.fig.canvas.mpl_connect('button_release_event', self.on_pan_release)
+        self.cid_pan_motion = self.fig.canvas.mpl_connect('motion_notify_event', self.on_pan_motion)
+
+        # Control panel
         self.control_frame = tk.Frame(self.root)
-        self.control_frame.pack(side=tk.BOTTOM, fill=tk.X)
+        self.control_frame.grid(row=1, column=0, columnspan=4, pady=10)
 
-        # Canvas for images
-        self.canvas1 = tk.Canvas(self.canvas_frame, width=500, height=500, bg="white")
-        self.canvas1.pack(side=tk.LEFT, padx=5, pady=5)
+        tk.Button(self.control_frame, text="Load Original Image", command=self.load_original_image).grid(row=0, column=0)
+        tk.Button(self.control_frame, text="Load Transformed Image", command=self.load_transformed_image).grid(row=0, column=1)
+        tk.Button(self.control_frame, text="Register Images", command=self.register_images).grid(row=0, column=2)
 
-        self.canvas2 = tk.Canvas(self.canvas_frame, width=500, height=500, bg="white")
-        self.canvas2.pack(side=tk.LEFT, padx=5, pady=5)
+        # Point editing
+        self.edit_frame = tk.Frame(self.root)
+        self.edit_frame.grid(row=2, column=0, columnspan=4, pady=10)
 
-        self.result_canvas = tk.Canvas(self.canvas_frame, width=500, height=500, bg="white")
-        self.result_canvas.pack(side=tk.LEFT, padx=5, pady=5)
+        tk.Label(self.edit_frame, text="Original Image Points:").grid(row=0, column=0, sticky="w")
+        tk.Label(self.edit_frame, text="Transformed Image Points:").grid(row=0, column=1, sticky="w")
 
-        # Coordinate input
-        self.coord_frame1 = tk.Frame(self.control_frame)
-        self.coord_frame1.pack(side=tk.LEFT, padx=10)
-        self.coord_labels1 = []
-        self.coord_entries1 = []
+        self.original_points_listbox = tk.Listbox(self.edit_frame, width=30, height=10)
+        self.original_points_listbox.grid(row=1, column=0, padx=5)
 
-        self.coord_frame2 = tk.Frame(self.control_frame)
-        self.coord_frame2.pack(side=tk.RIGHT, padx=10)
-        self.coord_labels2 = []
-        self.coord_entries2 = []
+        self.transformed_points_listbox = tk.Listbox(self.edit_frame, width=30, height=10)
+        self.transformed_points_listbox.grid(row=1, column=1, padx=5)
 
-        for i in range(self.n_points):
-            label1 = tk.Label(self.coord_frame1, text=f"Point {i + 1}:")
-            label1.grid(row=i, column=0, padx=5)
+        tk.Button(self.edit_frame, text="Delete Selected Point (Original)", command=self.delete_original_point).grid(row=2, column=0)
+        tk.Button(self.edit_frame, text="Delete Selected Point (Transformed)", command=self.delete_transformed_point).grid(row=2, column=1)
 
-            x_entry1 = tk.Entry(self.coord_frame1, width=5)
-            x_entry1.grid(row=i, column=1, padx=5)
+        # Log frame
+        self.log_frame = tk.Frame(self.root)
+        self.log_frame.grid(row=3, column=0, columnspan=4, pady=10)
 
-            y_entry1 = tk.Entry(self.coord_frame1, width=5)
-            y_entry1.grid(row=i, column=2, padx=5)
+        self.log_text = tk.Text(self.log_frame, width=100, height=5)
+        self.log_text.grid(row=0, column=0, padx=10)
 
-            self.coord_labels1.append(label1)
-            self.coord_entries1.append((x_entry1, y_entry1))
+    def load_original_image(self):
+        file_path = filedialog.askopenfilename()
+        if file_path:
+            self.original_image = imread(file_path, as_gray=True)
+            self.axs[0].imshow(self.original_image, cmap='gray')
+            self.axs[0].set_title("Original Image")
+            self.canvas.draw()
 
-            label2 = tk.Label(self.coord_frame2, text=f"Point {i + 1}:")
-            label2.grid(row=i, column=0, padx=5)
-
-            x_entry2 = tk.Entry(self.coord_frame2, width=5)
-            x_entry2.grid(row=i, column=1, padx=5)
-
-            y_entry2 = tk.Entry(self.coord_frame2, width=5)
-            y_entry2.grid(row=i, column=2, padx=5)
-
-            self.coord_labels2.append(label2)
-            self.coord_entries2.append((x_entry2, y_entry2))
-
-        # Register button (disabled initially)
-        self.register_button = tk.Button(self.control_frame, text="Register Images", command=self.register_images,
-                                         state=tk.DISABLED)
-        self.register_button.pack(pady=10)
-
-        # Log box
-        self.log_box = tk.Text(self.control_frame, height=5, wrap=tk.WORD)
-        self.log_box.pack(fill=tk.X, padx=10, pady=10)
-
-        # Attributes for storing images and points
-        self.image1 = None
-        self.image2 = None
-        self.points1 = []
-        self.points2 = []
-        self.zoom_factor1 = 1.0  # Zoom factor for canvas1
-        self.zoom_factor2 = 1.0  # Zoom factor for canvas2
-        self.offset_x1 = 0
-        self.offset_y1 = 0
-        self.offset_x2 = 0
-        self.offset_y2 = 0
-
-        self.load_test_images()
-        self.display_images()
-
-        self.canvas1.bind("<Button-1>", self.mark_point_image1)
-        self.canvas2.bind("<Button-1>", self.mark_point_image2)
-        self.canvas1.bind("<MouseWheel>", self.zoom_canvas1)
-        self.canvas2.bind("<MouseWheel>", self.zoom_canvas2)
-
-        self.setup_entry_bindings()
-
-    def load_test_images(self):
-        """Generate test images."""
-        generator = TestImageGenerator()
-        self.image1 = generator.create_base_image()
-        self.image2 = generator.apply_transformation(self.image1, scale=0.9, rotation=15, shift=(50, 30))
-
-    def display_images(self):
-        """Display images on the canvases."""
-        img1 = ImageTk.PhotoImage(image=Image.fromarray(cv2.cvtColor(self.image1, cv2.COLOR_BGR2RGB)))
-        img2 = ImageTk.PhotoImage(image=Image.fromarray(cv2.cvtColor(self.image2, cv2.COLOR_BGR2RGB)))
-
-        self.canvas1.image = img1
-        self.canvas1.create_image(0, 0, anchor=tk.NW, image=img1)
-
-        self.canvas2.image = img2
-        self.canvas2.create_image(0, 0, anchor=tk.NW, image=img2)
-
-    def zoom_canvas1(self, event):
-        """Handle zooming on Canvas 1."""
-        self.zoom_factor1, self.offset_x1, self.offset_y1 = self.zoom_image(event, self.canvas1, self.image1,
-                                                                            self.points1, "red", self.zoom_factor1,
-                                                                            self.offset_x1, self.offset_y1)
-
-    def zoom_canvas2(self, event):
-        """Handle zooming on Canvas 2."""
-        self.zoom_factor2, self.offset_x2, self.offset_y2 = self.zoom_image(event, self.canvas2, self.image2,
-                                                                            self.points2, "blue", self.zoom_factor2,
-                                                                            self.offset_x2, self.offset_y2)
-
-    def zoom_image(self, event, canvas, image, points, color, zoom_factor, offset_x, offset_y):
-        """Zoom in or out on the given canvas, centering on the mouse position."""
-        scale_factor = 1.1 if event.delta > 0 else 0.9  # Zoom in or out
-        new_zoom_factor = zoom_factor * scale_factor
-
-        # Calculate mouse position relative to the current canvas view
-        canvas_mouse_x = canvas.canvasx(event.x)
-        canvas_mouse_y = canvas.canvasy(event.y)
-
-        # Adjust offsets to keep zoom centered around the mouse
-        offset_x = (offset_x + canvas_mouse_x) * scale_factor - canvas_mouse_x
-        offset_y = (offset_y + canvas_mouse_y) * scale_factor - canvas_mouse_y
-
-        # Clear canvas and redraw zoomed image
-        canvas.delete("all")
-        zoomed_image = cv2.resize(image, None, fx=new_zoom_factor, fy=new_zoom_factor, interpolation=cv2.INTER_LINEAR)
-        img_display = ImageTk.PhotoImage(image=Image.fromarray(cv2.cvtColor(zoomed_image, cv2.COLOR_BGR2RGB)))
-        canvas.image = img_display
-        canvas.create_image(-offset_x, -offset_y, anchor=tk.NW, image=img_display)
-
-        # Recalculate and redraw markers
-        for i, (x, y) in enumerate(points):
-            scaled_x = int(x * new_zoom_factor - offset_x)
-            scaled_y = int(y * new_zoom_factor - offset_y)
-            canvas.create_oval(scaled_x - 3, scaled_y - 3, scaled_x + 3, scaled_y + 3, fill=color)
-            canvas.create_text(scaled_x + 10, scaled_y, text=str(i + 1), fill=color)
-
-        return new_zoom_factor, offset_x, offset_y
-
-    def mark_point_image1(self, event):
-        """Mark a point on image1 and log it."""
-        x, y = event.x, event.y
-        x = (x + self.offset_x1) / self.zoom_factor1
-        y = (y + self.offset_y1) / self.zoom_factor1
-        if len(self.points1) < self.n_points:
-            self.points1.append((x, y))
-            self.canvas1.create_oval(event.x - 3, event.y - 3, event.x + 3, event.y + 3, fill="red")
-            self.canvas1.create_text(event.x + 10, event.y, text=str(len(self.points1)), fill="red")
-            self.coord_entries1[len(self.points1) - 1][0].delete(0, tk.END)
-            self.coord_entries1[len(self.points1) - 1][0].insert(0, str(int(x)))
-            self.coord_entries1[len(self.points1) - 1][1].delete(0, tk.END)
-            self.coord_entries1[len(self.points1) - 1][1].insert(0, str(int(y)))
-            self.log_message(f"Point {len(self.points1)} marked on Image 1: ({x}, {y})")
-            self.check_register_button()
-
-    def mark_point_image2(self, event):
-        """Mark a point on image2 and log it."""
-        x, y = event.x, event.y
-        x = (x + self.offset_x2) / self.zoom_factor2
-        y = (y + self.offset_y2) / self.zoom_factor2
-        if len(self.points2) < self.n_points:
-            self.points2.append((x, y))
-            self.canvas2.create_oval(event.x - 3, event.y - 3, event.x + 3, event.y + 3, fill="blue")
-            self.canvas2.create_text(event.x + 10, event.y, text=str(len(self.points2)), fill="blue")
-            self.coord_entries2[len(self.points2) - 1][0].delete(0, tk.END)
-            self.coord_entries2[len(self.points2) - 1][0].insert(0, str(int(x)))
-            self.coord_entries2[len(self.points2) - 1][1].delete(0, tk.END)
-            self.coord_entries2[len(self.points2) - 1][1].insert(0, str(int(y)))
-            self.log_message(f"Point {len(self.points2)} marked on Image 2: ({x}, {y})")
-            self.check_register_button()
-
-    def check_register_button(self):
-        """Enable the register button if enough points are marked."""
-        if len(self.points1) >= 4 and len(self.points2) >= 4:
-            self.register_button.config(state=tk.NORMAL)
-
-    def sync_points_from_entry(self, entry_list, points, canvas, color):
-        """Synchronize marker positions on canvas with text box values."""
-        canvas.delete("all")
-        self.display_images()
-        for i, (x_entry, y_entry) in enumerate(entry_list):
-            try:
-                x = int(x_entry.get())
-                y = int(y_entry.get())
-                if 0 <= x < 500 and 0 <= y < 500:
-                    points[i] = (x, y)
-                    canvas.create_oval(x - 3, y - 3, x + 3, y + 3, fill=color)
-                    canvas.create_text(x + 10, y, text=str(i + 1), fill=color)
-                else:
-                    self.log_message(f"Warning: Point {i + 1} out of bounds ({x}, {y})", level="warning")
-            except ValueError:
-                self.log_message(f"Warning: Invalid value at Point {i + 1}. Ignoring.", level="warning")
-
-    def setup_entry_bindings(self):
-        """Bind text box events to synchronize markers."""
-        for i, (x_entry1, y_entry1) in enumerate(self.coord_entries1):
-            x_entry1.bind("<FocusOut>",
-                          lambda e, idx=i: self.sync_points_from_entry(self.coord_entries1, self.points1, self.canvas1,
-                                                                       "red"))
-            y_entry1.bind("<FocusOut>",
-                          lambda e, idx=i: self.sync_points_from_entry(self.coord_entries1, self.points1, self.canvas1,
-                                                                       "red"))
-
-        for i, (x_entry2, y_entry2) in enumerate(self.coord_entries2):
-            x_entry2.bind("<FocusOut>",
-                          lambda e, idx=i: self.sync_points_from_entry(self.coord_entries2, self.points2, self.canvas2,
-                                                                       "blue"))
-            y_entry2.bind("<FocusOut>",
-                          lambda e, idx=i: self.sync_points_from_entry(self.coord_entries2, self.points2, self.canvas2,
-                                                                       "blue"))
+    def load_transformed_image(self):
+        file_path = filedialog.askopenfilename()
+        if file_path:
+            self.transformed_image = imread(file_path, as_gray=True)
+            self.axs[1].imshow(self.transformed_image, cmap='gray')
+            self.axs[1].set_title("Transformed Image")
+            self.canvas.draw()
 
     def register_images(self):
-        """Calculate and log the transformation matrix."""
-        if len(self.points1) < 4 or len(self.points2) < 4:
-            self.log_message("Error: At least 4 points are required on both images.", level="warning")
+        """
+        Registers the transformed image to the original image using selected points.
+        """
+        if len(self.fixed_points) < 3 or len(self.moving_points) < 3:
+            self.log("At least 3 points are required for registration.")
             return
 
-        points1 = np.array(self.points1[:4], dtype=np.float32)
-        points2 = np.array(self.points2[:4], dtype=np.float32)
+        if len(self.fixed_points) != len(self.moving_points):
+            self.log("The number of points in both images must be the same.")
+            return
 
-        matrix, _ = cv2.estimateAffinePartial2D(points2, points1)
+        fixed_points = np.array(self.fixed_points)
+        moving_points = np.array(self.moving_points)
 
-        # Calculate transformation components
-        shift = matrix[:, 2]
-        rotation_scale_matrix = matrix[:2, :2]
-        scale = np.linalg.norm(rotation_scale_matrix[0])
-        rotation = np.arctan2(rotation_scale_matrix[1, 0], rotation_scale_matrix[0, 0]) * (180 / np.pi)
+        # Estimate the affine transformation
+        transform = AffineTransform()
+        if not transform.estimate(moving_points, fixed_points):
+            self.log("Affine transformation estimation failed.")
+            return
 
-        self.log_message(f"Calculated Shift: {shift}")
-        self.log_message(f"Calculated Scaling: {scale}")
-        self.log_message(f"Calculated Rotation: {rotation} degrees")
-        self.log_message(f"Transformation Matrix:\n{matrix}")
+        # Apply the affine transformation to register the transformed image
+        self.registered_image = warp(
+            self.transformed_image,
+            transform.inverse,
+            output_shape=self.original_image.shape,
+            order=0,  # Use nearest-neighbor interpolation for sharpness
+            preserve_range=True  # Preserve original pixel values
+        ).astype(self.original_image.dtype)
 
-        self.apply_transformation(matrix)
+        # Display the registered image in the third panel
+        self.axs[2].imshow(self.registered_image, cmap='gray')
+        self.axs[2].set_title("Registered Image")
 
-    def apply_transformation(self, matrix):
-        """Apply the calculated transformation to Image 2 and display results."""
-        rows, cols, _ = self.image1.shape
-        transformed = cv2.warpAffine(self.image2, matrix, (cols, rows))
-        blended = cv2.addWeighted(self.image1, 0.5, transformed, 0.5, 0)
+        # Blend the original image and the registered image with 50% weightage for each
+        blended_image = 0.5 * self.original_image + 0.5 * self.registered_image
+        blended_image = np.clip(blended_image, 0, 1)  # Ensure pixel values are in the valid range [0, 1]
+        self.axs[3].imshow(blended_image, cmap='gray')
+        self.axs[3].set_title("Superimposed Image")
+        self.canvas.draw()
 
-        result_img = ImageTk.PhotoImage(image=Image.fromarray(cv2.cvtColor(blended, cv2.COLOR_BGR2RGB)))
-        self.result_canvas.image = result_img
-        self.result_canvas.create_image(0, 0, anchor=tk.NW, image=result_img)
-        self.log_message("Images successfully registered and displayed.")
+        # Log the transformation parameters
+        self.log_transformation(transform)
 
-    def log_message(self, message, level="info"):
-        """Log a message to the text box with a timestamp."""
+    def log_transformation(self, transform):
+        scale_x = np.sqrt(transform.params[0, 0] ** 2 + transform.params[0, 1] ** 2)
+        scale_y = np.sqrt(transform.params[1, 0] ** 2 + transform.params[1, 1] ** 2)
+        rotation = np.arctan2(transform.params[1, 0], transform.params[0, 0]) * (180 / np.pi)
+        translation = (transform.params[0, 2], transform.params[1, 2])
+
+        self.log(f"Scaling (x, y): ({scale_x:.2f}, {scale_y:.2f})")
+        self.log(f"Rotation (degrees): {rotation:.2f}")
+        self.log(f"Translation (x, y): ({translation[0]:.2f}, {translation[1]:.2f})")
+
+    def on_click(self, event):
+        if event.inaxes == self.axs[0] and self.original_image is not None:
+            x, y = event.xdata, event.ydata
+            self.fixed_points.append((x, y))
+            self.original_points_listbox.insert(tk.END, f"({x:.1f}, {y:.1f})")
+            self.axs[0].scatter(x, y, color='red', s=30)
+            self.axs[0].text(x + 5, y, f"{len(self.fixed_points)}", color='red', fontsize=10)
+            self.log(f"Point marked on Original Image: ({x:.1f}, {y:.1f})")
+        elif event.inaxes == self.axs[1] and self.transformed_image is not None:
+            x, y = event.xdata, event.ydata
+            self.moving_points.append((x, y))
+            self.transformed_points_listbox.insert(tk.END, f"({x:.1f}, {y:.1f})")
+            self.axs[1].scatter(x, y, color='blue', s=30)
+            self.axs[1].text(x + 5, y, f"{len(self.moving_points)}", color='blue', fontsize=10)
+            self.log(f"Point marked on Transformed Image: ({x:.1f}, {y:.1f})")
+        self.canvas.draw()
+
+    def on_zoom(self, event):
+        """
+        Zoom in or out based on mouse pointer location.
+        """
+        ax = event.inaxes
+        if ax in [self.axs[0], self.axs[1]]:  # Allow zooming only on specific axes
+            zoom_factor = 0.9 if event.button == 'up' else 1.1
+            x_mouse, y_mouse = event.xdata, event.ydata
+            x_min, x_max = ax.get_xlim()
+            y_min, y_max = ax.get_ylim()
+
+            x_range = (x_max - x_min) * zoom_factor
+            y_range = (y_max - y_min) * zoom_factor
+
+            ax.set_xlim(
+                x_mouse - (x_mouse - x_min) * zoom_factor,
+                x_mouse + (x_max - x_mouse) * zoom_factor
+            )
+            ax.set_ylim(
+                y_mouse - (y_mouse - y_min) * zoom_factor,
+                y_mouse + (y_max - y_mouse) * zoom_factor
+            )
+            self.canvas.draw()
+
+    def on_pan_press(self, event):
+        """
+        Start panning when the mouse is pressed.
+        """
+        if event.inaxes in [self.axs[0], self.axs[1]]:
+            self.is_panning = True
+            self.pan_start = (event.xdata, event.ydata)
+            self.current_ax = event.inaxes
+
+    def on_pan_release(self, event):
+        """
+        Stop panning when the mouse is released.
+        """
+        self.is_panning = False
+        self.pan_start = None
+        self.current_ax = None
+
+    def on_pan_motion(self, event):
+        """
+        Perform panning when the mouse is dragged.
+        """
+        if self.is_panning and self.current_ax and event.xdata and event.ydata:
+            x_start, y_start = self.pan_start
+            dx = x_start - event.xdata
+            dy = y_start - event.ydata
+
+            x_min, x_max = self.current_ax.get_xlim()
+            y_min, y_max = self.current_ax.get_ylim()
+
+            self.current_ax.set_xlim(x_min + dx, x_max + dx)
+            self.current_ax.set_ylim(y_min + dy, y_max + dy)
+            self.pan_start = (event.xdata, event.ydata)
+
+            self.canvas.draw()
+
+    def delete_original_point(self):
+        selected_index = self.original_points_listbox.curselection()
+        if selected_index:
+            index = selected_index[0]
+            del self.fixed_points[index]
+            self.original_points_listbox.delete(index)
+            self.redraw_points()
+
+    def delete_transformed_point(self):
+        selected_index = self.transformed_points_listbox.curselection()
+        if selected_index:
+            index = selected_index[0]
+            del self.moving_points[index]
+            self.transformed_points_listbox.delete(index)
+            self.redraw_points()
+
+    def redraw_points(self):
+        self.axs[0].clear()
+        self.axs[0].imshow(self.original_image, cmap='gray')
+        self.axs[0].set_title("Original Image")
+
+        self.axs[1].clear()
+        self.axs[1].imshow(self.transformed_image, cmap='gray')
+        self.axs[1].set_title("Transformed Image")
+
+        for i, (x, y) in enumerate(self.fixed_points):
+            self.axs[0].scatter(x, y, color='red', s=30)
+            self.axs[0].text(x + 5, y, f"{i + 1}", color='red', fontsize=10)
+
+        for i, (x, y) in enumerate(self.moving_points):
+            self.axs[1].scatter(x, y, color='blue', s=30)
+            self.axs[1].text(x + 5, y, f"{i + 1}", color='blue', fontsize=10)
+
+        self.canvas.draw()
+
+    def log(self, message):
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        if level == "warning":
-            self.log_box.insert(tk.END, f"{timestamp} WARNING: {message}\n", ("warning",))
-            self.log_box.tag_config("warning", foreground="red")
-        else:
-            self.log_box.insert(tk.END, f"{timestamp} INFO: {message}\n")
-        self.log_box.see(tk.END)
+        self.log_text.insert(tk.END, f"{timestamp} INFO: {message}\n")
+        self.log_text.see(tk.END)
+
+
+# Main execution
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = ImageRegistrationTool(root)
+    root.mainloop()
