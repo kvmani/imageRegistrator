@@ -35,8 +35,8 @@ class ImageRegistrationTool:
 
         # Canvas for displaying images
         self.fig, self.axs = plt.subplots(1, 4, figsize=(16, 5))
-        self.axs[0].set_title("Original Image")
-        self.axs[1].set_title("Transformed Image")
+        self.axs[0].set_title("EBSD (.ang) Image")
+        self.axs[1].set_title("LRS Image")
         self.axs[2].set_title("Registered Image")
         self.axs[3].set_title("Superimposed Image")
         self.canvas = FigureCanvasTkAgg(self.fig, self.image_frame)
