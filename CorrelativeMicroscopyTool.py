@@ -9,59 +9,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from skimage.io import imread
 from skimage.transform import AffineTransform, warp
 from skimage.measure import ransac
-
-
-# EBSD Image Generator Class
-class EBSDImageGenerator:
-    def __init__(self, filepath, output_folder):
-        self.filepath = filepath
-        self.output_folder = output_folder
-        self.header = {}
-        self.data = None
-        self.image = None
-        self.validate_file()
-        self.read_file()
-        self.generate_image()
-        self.save_image()
-
-    def validate_file(self):
-        if not os.path.isfile(self.filepath):
-            raise FileNotFoundError(f"File not found: {self.filepath}. Please verify the file path.")
-        print(f"File located: {self.filepath}")
-
-    def read_file(self):
-        valid_keys = {"XSTEP", "YSTEP", "NCOLS_ODD", "NROWS"}
-        with open(self.filepath, 'r') as f:
-            header_lines = [line for line in f if line.startswith('#')]
-        for line in header_lines:
-            if ':' in line:
-                key, value = line[2:].split(':')
-                key = key.strip()
-                if key in valid_keys:
-                    self.header[key] = float(value.strip())
-
-        # Read numeric data without the deprecated argument
-        self.data = pd.read_csv(self.filepath, comment='#', delim_whitespace=True, header=None, on_bad_lines='skip')
-        print("Header and numeric data successfully loaded.")
-
-    def generate_image(self):
-        ncols_odd = int(self.header.get('NCOLS_ODD', 0))
-        nrows = int(self.header.get('NROWS', 0))
-        if 5 not in self.data.columns:
-            raise ValueError("Column 6 (IQ values) not found in data")
-        if len(self.data[5]) != nrows * ncols_odd:
-            raise ValueError("Data size mismatch: IQ values do not match specified grid dimensions.")
-        self.image = self.data[5].values.reshape(nrows, ncols_odd)
-        print("EBSD IQ image generated successfully.")
-
-    def save_image(self):
-        if self.image is not None:
-            output_path = os.path.join(self.output_folder, "ImageAngNi.png")
-            norm_image = cv2.normalize(self.image, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-            cv2.imwrite(output_path, norm_image)
-            print(f"Image saved to: {output_path}")
-        else:
-            print("No image generated to save.")
+import EBSDImageGenerator
 
 
 # GUI Class
@@ -75,6 +23,7 @@ class ImageRegistrationTool:
         self.registered_image = None
         self.fixed_points = []
         self.moving_points = []
+        self.zoom_levels = [1.0, 1.0, 1.0, 1.0]  # For each subplot
         self.setup_ui()
 
     def setup_ui(self):
@@ -91,14 +40,14 @@ class ImageRegistrationTool:
             ax.set_title(title)
         self.canvas = FigureCanvasTkAgg(self.fig, self.image_frame)
         self.canvas.get_tk_widget().pack()
+        self.canvas.mpl_connect("scroll_event", self.on_zoom)
         self.canvas.mpl_connect("button_press_event", self.on_click)
 
         # Control panel
         control_frame = tk.Frame(self.root)
         control_frame.grid(row=2, column=0, columnspan=4, pady=10)
         tk.Button(control_frame, text="Load EBSD Data", command=self.load_original_image).grid(row=0, column=0)
-        tk.Button(control_frame, text="Load LRS Data", command=self.load_transformed_image).grid(row=0,
-                                                                                                          column=1)
+        tk.Button(control_frame, text="Load LRS Data", command=self.load_transformed_image).grid(row=0, column=1)
         tk.Button(control_frame, text="Register with Affine", command=self.register_with_affine).grid(row=0, column=2)
         tk.Button(control_frame, text="Register with RANSAC", command=self.register_with_ransac).grid(row=0, column=3)
 
@@ -114,10 +63,8 @@ class ImageRegistrationTool:
         self.transformed_points_listbox = tk.Listbox(edit_frame, width=30, height=10)
         self.transformed_points_listbox.grid(row=1, column=1, padx=5)
 
-        tk.Button(edit_frame, text="Delete Selected Point (Original)", command=self.delete_original_point).grid(row=2,
-                                                                                                                column=0)
-        tk.Button(edit_frame, text="Delete Selected Point (Transformed)", command=self.delete_transformed_point).grid(
-            row=2, column=1)
+        tk.Button(edit_frame, text="Delete Selected Point (Original)", command=self.delete_original_point).grid(row=2, column=0)
+        tk.Button(edit_frame, text="Delete Selected Point (Transformed)", command=self.delete_transformed_point).grid(row=2, column=1)
 
     def on_click(self, event):
         """Handles mouse clicks on Original and Transformed Images."""
@@ -126,14 +73,59 @@ class ImageRegistrationTool:
             if x is not None and y is not None:
                 self.fixed_points.append((x, y))
                 self.original_points_listbox.insert(tk.END, f"({x:.1f}, {y:.1f})")
-                self.axs[0].scatter(x, y, color='red')
+                # Annotate the point with Point ID
+                point_id = len(self.fixed_points)  # Use the index as Point ID
+                annotation = self.axs[0].scatter(x, y, color='red', zorder=5)
+                text = self.axs[0].text(x, y, f"{point_id}", color='red', fontsize=10, zorder=6)
+                self.fixed_points[-1] = (x, y, annotation, text)
                 self.canvas.draw()
         elif event.inaxes == self.axs[1]:  # Transformed Image
             x, y = event.xdata, event.ydata
             if x is not None and y is not None:
                 self.moving_points.append((x, y))
                 self.transformed_points_listbox.insert(tk.END, f"({x:.1f}, {y:.1f})")
-                self.axs[1].scatter(x, y, color='blue')
+                # Annotate the point with Point ID
+                point_id = len(self.moving_points)  # Use the index as Point ID
+                annotation = self.axs[1].scatter(x, y, color='blue', zorder=5)
+                text = self.axs[1].text(x, y, f"{point_id}", color='blue', fontsize=10, zorder=6)
+                self.moving_points[-1] = (x, y, annotation, text)
+                self.canvas.draw()
+
+
+
+    def on_zoom(self, event):
+        """Handles zooming in and out on scroll."""
+        for ax in self.axs:
+            if event.inaxes == ax:
+                x_min, x_max = ax.get_xlim()
+                y_min, y_max = ax.get_ylim()
+
+                # Calculate zoom factor
+                zoom_factor = 0.2
+                if event.button == 'up':  # Zoom in
+                    x_range = (x_max - x_min) * zoom_factor
+                    y_range = (y_max - y_min) * zoom_factor
+                    x_min += x_range
+                    x_max -= x_range
+                    y_min += y_range
+                    y_max -= y_range
+                elif event.button == 'down':  # Zoom out
+                    x_range = (x_max - x_min) * zoom_factor
+                    y_range = (y_max - y_min) * zoom_factor
+                    x_min -= x_range
+                    x_max += x_range
+                    y_min -= y_range
+                    y_max += y_range
+
+                # Ensure no empty canvas regions
+                x_min = max(x_min, 0)
+                y_min = max(y_min, 0)
+                if self.original_image is not None:
+                    x_max = min(x_max, np.array(self.original_image).shape[1])
+                    y_max = min(y_max, np.array(self.original_image).shape[0])
+
+                ax.set_xlim(x_min, x_max)
+                ax.set_ylim(y_max, y_min)  # Invert Y-axis for correct display
                 self.canvas.draw()
 
     def register_with_affine(self):
@@ -177,9 +169,9 @@ class ImageRegistrationTool:
             if file_path.endswith('.ang'):
                 try:
                     output_folder = os.path.dirname(file_path)
-                    ebsd_gen = EBSDImageGenerator(file_path, output_folder)
+                    ebsd_gen = EBSDImageGenerator.EBSDImageGenerator(file_path, output_folder)
                     self.original_image = ebsd_gen.image
-                    self.axs[0].imshow(self.original_image, cmap='gray')
+                    self.axs[0].imshow(np.array(self.original_image), cmap='gray')
                     self.axs[0].set_title("EBSD Image")
                     self.canvas.draw()
                 except Exception as e:
@@ -190,6 +182,27 @@ class ImageRegistrationTool:
                 self.axs[0].set_title("Original Image")
                 self.canvas.draw()
 
+    def delete_original_point(self):
+        selected = self.original_points_listbox.curselection()
+        if selected:
+            index = selected[0]
+            _, _, scatter, text = self.fixed_points[index]  # Retrieve scatter and text handles
+            scatter.remove()  # Remove scatter annotation from the plot
+            text.remove()  # Remove text annotation from the plot
+            self.fixed_points.pop(index)  # Remove the point data
+            self.original_points_listbox.delete(index)  # Remove from listbox
+            self.canvas.draw()
+
+    def delete_transformed_point(self):
+        selected = self.transformed_points_listbox.curselection()
+        if selected:
+            index = selected[0]
+            _, _, scatter, text = self.moving_points[index]  # Retrieve scatter and text handles
+            scatter.remove()  # Remove scatter annotation from the plot
+            text.remove()  # Remove text annotation from the plot
+            self.moving_points.pop(index)  # Remove the point data
+            self.transformed_points_listbox.delete(index)  # Remove from listbox
+            self.canvas.draw()
     def load_transformed_image(self):
         file_path = filedialog.askopenfilename()
         if file_path:
@@ -198,23 +211,10 @@ class ImageRegistrationTool:
             self.axs[1].set_title("LRS Image")
             self.canvas.draw()
 
-    def delete_original_point(self):
-        selected = self.original_points_listbox.curselection()
-        if selected:
-            self.original_points_listbox.delete(selected[0])
-            self.fixed_points.pop(selected[0])
-            self.canvas.draw()
-
-    def delete_transformed_point(self):
-        selected = self.transformed_points_listbox.curselection()
-        if selected:
-            self.transformed_points_listbox.delete(selected[0])
-            self.moving_points.pop(selected[0])
-            self.canvas.draw()
 
 
-# Run GUI
 if __name__ == "__main__":
     root = tk.Tk()
     app = ImageRegistrationTool(root)
     root.mainloop()
+
