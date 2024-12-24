@@ -132,36 +132,33 @@ class ImageRegistrationTool:
         if len(self.fixed_points) < 3 or len(self.moving_points) < 3:
             print("At least 3 points are required for affine registration.")
             return
-        transform = AffineTransform()
-        transform.estimate(np.array(self.moving_points), np.array(self.fixed_points))
-        self.apply_transformation(transform)
+
+        try:
+            # Extract only the (x, y) coordinates for registration
+            fixed_points_coords = np.array([(x, y) for x, y, _, _ in self.fixed_points])
+            moving_points_coords = np.array([(x, y) for x, y, _, _ in self.moving_points])
+
+            transform = AffineTransform()
+            transform.estimate(moving_points_coords, fixed_points_coords)
+            self.apply_transformation(transform)
+        except ValueError as e:
+            print(f"Affine registration error: {e}")
 
     def register_with_ransac(self):
         if len(self.fixed_points) < 3 or len(self.moving_points) < 3:
             print("At least 3 points are required for RANSAC registration.")
             return
-        model, _ = ransac((np.array(self.moving_points), np.array(self.fixed_points)),
-                          AffineTransform, min_samples=3, residual_threshold=2)
-        self.apply_transformation(model)
 
-    def apply_transformation(self, transform):
-        self.registered_image = warp(self.transformed_image, transform.inverse, output_shape=self.original_image.shape)
-        self.axs[2].imshow(self.registered_image, cmap='gray')
-        self.axs[2].set_title("Registered Image")
+        try:
+            # Extract only the (x, y) coordinates for registration
+            fixed_points_coords = np.array([(x, y) for x, y, _, _ in self.fixed_points])
+            moving_points_coords = np.array([(x, y) for x, y, _, _ in self.moving_points])
 
-        # Individually normalize both images to [0, 1]
-        normalized_original = (self.original_image - self.original_image.min()) / (
-                    self.original_image.max() - self.original_image.min())
-        normalized_registered = (self.registered_image - self.registered_image.min()) / (
-                    self.registered_image.max() - self.registered_image.min())
-
-        # Blend and rescale to 255
-        blended = 0.5 * normalized_original + 0.5 * normalized_registered
-        blended = (blended * 255).astype(np.uint8)
-
-        self.axs[3].imshow(blended, cmap='gray')
-        self.axs[3].set_title("Superimposed Image")
-        self.canvas.draw()
+            model, _ = ransac((moving_points_coords, fixed_points_coords),
+                              AffineTransform, min_samples=3, residual_threshold=2)
+            self.apply_transformation(model)
+        except ValueError as e:
+            print(f"RANSAC registration error: {e}")
 
     def load_original_image(self):
         file_path = filedialog.askopenfilename()
@@ -170,17 +167,49 @@ class ImageRegistrationTool:
                 try:
                     output_folder = os.path.dirname(file_path)
                     ebsd_gen = EBSDImageGenerator.EBSDImageGenerator(file_path, output_folder)
-                    self.original_image = ebsd_gen.image
-                    self.axs[0].imshow(np.array(self.original_image), cmap='gray')
+                    self.original_image = np.array(ebsd_gen.image)  # Ensure it's a numpy array
+                    self.axs[0].imshow(self.original_image, cmap='gray')
                     self.axs[0].set_title("EBSD Image")
                     self.canvas.draw()
                 except Exception as e:
                     print(f"Error loading EBSD file: {e}")
             else:
                 self.original_image = imread(file_path, as_gray=True)
+                self.original_image = np.array(self.original_image)  # Ensure it's a numpy array
                 self.axs[0].imshow(self.original_image, cmap='gray')
                 self.axs[0].set_title("Original Image")
                 self.canvas.draw()
+
+    def apply_transformation(self, transform):
+        if self.original_image is None or self.transformed_image is None:
+            print("Error: Load both original and transformed images before registration.")
+            return
+
+        try:
+            # Ensure the images are numpy arrays
+            self.original_image = np.array(self.original_image)
+            self.transformed_image = np.array(self.transformed_image)
+
+            self.registered_image = warp(self.transformed_image, transform.inverse,
+                                         output_shape=self.original_image.shape)
+            self.axs[2].imshow(self.registered_image, cmap='gray')
+            self.axs[2].set_title("Registered Image")
+
+            # Individually normalize both images to [0, 1]
+            normalized_original = (self.original_image - self.original_image.min()) / (
+                    self.original_image.max() - self.original_image.min())
+            normalized_registered = (self.registered_image - self.registered_image.min()) / (
+                    self.registered_image.max() - self.registered_image.min())
+
+            # Blend and rescale to 255
+            blended = 0.5 * normalized_original + 0.5 * normalized_registered
+            blended = (blended * 255).astype(np.uint8)
+
+            self.axs[3].imshow(blended, cmap='gray')
+            self.axs[3].set_title("Superimposed Image")
+            self.canvas.draw()
+        except Exception as e:
+            print(f"Error during transformation: {e}")
 
     def delete_original_point(self):
         selected = self.original_points_listbox.curselection()
