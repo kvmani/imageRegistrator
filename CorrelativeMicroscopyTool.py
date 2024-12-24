@@ -163,19 +163,19 @@ class ImageRegistrationTool:
     def load_original_image(self):
         file_path = filedialog.askopenfilename()
         if file_path:
+            self.original_image_path = file_path  # Save the path for later use
             if file_path.endswith('.ang'):
                 try:
                     output_folder = os.path.dirname(file_path)
                     ebsd_gen = EBSDImageGenerator.EBSDImageGenerator(file_path, output_folder)
-                    self.original_image = np.array(ebsd_gen.image)  # Ensure it's a numpy array
-                    self.axs[0].imshow(self.original_image, cmap='gray')
+                    self.original_image = ebsd_gen.image
+                    self.axs[0].imshow(np.array(self.original_image), cmap='gray')
                     self.axs[0].set_title("EBSD Image")
                     self.canvas.draw()
                 except Exception as e:
                     print(f"Error loading EBSD file: {e}")
             else:
                 self.original_image = imread(file_path, as_gray=True)
-                self.original_image = np.array(self.original_image)  # Ensure it's a numpy array
                 self.axs[0].imshow(self.original_image, cmap='gray')
                 self.axs[0].set_title("Original Image")
                 self.canvas.draw()
@@ -190,6 +190,7 @@ class ImageRegistrationTool:
             self.original_image = np.array(self.original_image)
             self.transformed_image = np.array(self.transformed_image)
 
+            # Perform the transformation
             self.registered_image = warp(self.transformed_image, transform.inverse,
                                          output_shape=self.original_image.shape)
             self.axs[2].imshow(self.registered_image, cmap='gray')
@@ -208,8 +209,41 @@ class ImageRegistrationTool:
             self.axs[3].imshow(blended, cmap='gray')
             self.axs[3].set_title("Superimposed Image")
             self.canvas.draw()
+
+            # Export the registered image
+            self.export_registered_image()
         except Exception as e:
             print(f"Error during transformation: {e}")
+
+    def export_registered_image(self):
+        try:
+            # Determine the common area (non-zero overlap)
+            mask_original = self.original_image > 0
+            mask_registered = self.registered_image > 0
+            common_area = mask_original & mask_registered
+
+            # Crop to the bounding box of the common area
+            rows, cols = np.where(common_area)
+            if rows.size == 0 or cols.size == 0:
+                print("No common area found between EBSD and LRS images.")
+                return
+
+            min_row, max_row = rows.min(), rows.max()
+            min_col, max_col = cols.min(), cols.max()
+            cropped_registered_image = self.registered_image[min_row:max_row + 1, min_col:max_col + 1]
+
+            # Normalize and convert to 8-bit for saving
+            cropped_registered_image = (cropped_registered_image - cropped_registered_image.min()) / (
+                    cropped_registered_image.max() - cropped_registered_image.min())
+            cropped_registered_image = (cropped_registered_image * 255).astype(np.uint8)
+
+            # Save the cropped registered image
+            output_folder = os.path.dirname(self.original_image_path)  # Use the path of the original EBSD file
+            output_path = os.path.join(output_folder, "registeredLRSImage.png")
+            cv2.imwrite(output_path, cropped_registered_image)
+            print(f"Registered image saved as: {output_path}")
+        except Exception as e:
+            print(f"Error exporting registered image: {e}")
 
     def delete_original_point(self):
         selected = self.original_points_listbox.curselection()
