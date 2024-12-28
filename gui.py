@@ -85,6 +85,7 @@ class ImageRegistrationTool:
         if file_path:
             self.original_image = imread(file_path, as_gray=True)
             self.axs[0].imshow(self.original_image, cmap='gray')
+            self.axs[0].set_aspect('equal', adjustable='box')
             self.axs[0].set_title("Original Image")
             self.canvas.draw()
 
@@ -93,6 +94,7 @@ class ImageRegistrationTool:
         if file_path:
             self.transformed_image = imread(file_path, as_gray=True)
             self.axs[1].imshow(self.transformed_image, cmap='gray')
+            self.axs[1].set_aspect('equal', adjustable='box')
             self.axs[1].set_title("Transformed Image")
             self.canvas.draw()
 
@@ -172,6 +174,12 @@ class ImageRegistrationTool:
         Zoom in or out based on mouse pointer location.
         """
         ax = event.inaxes
+        if ax not in [self.axs[0], self.axs[1]]:
+            return
+            # Make sure the mouse is inside valid data coords
+        if event.xdata is None or event.ydata is None:
+            return
+
         if ax in [self.axs[0], self.axs[1]]:  # Allow zooming only on specific axes
             zoom_factor = 0.9 if event.button == 'up' else 1.1
             x_mouse, y_mouse = event.xdata, event.ydata
@@ -191,40 +199,40 @@ class ImageRegistrationTool:
             )
             self.canvas.draw()
 
-    def on_pan_press(self, event):
-        """
-        Start panning when the mouse is pressed.
-        """
-        if event.inaxes in [self.axs[0], self.axs[1]]:
-            self.is_panning = True
-            self.pan_start = (event.xdata, event.ydata)
-            self.current_ax = event.inaxes
-
-    def on_pan_release(self, event):
-        """
-        Stop panning when the mouse is released.
-        """
-        self.is_panning = False
-        self.pan_start = None
-        self.current_ax = None
-
-    def on_pan_motion(self, event):
-        """
-        Perform panning when the mouse is dragged.
-        """
-        if self.is_panning and self.current_ax and event.xdata and event.ydata:
-            x_start, y_start = self.pan_start
-            dx = x_start - event.xdata
-            dy = y_start - event.ydata
-
-            x_min, x_max = self.current_ax.get_xlim()
-            y_min, y_max = self.current_ax.get_ylim()
-
-            self.current_ax.set_xlim(x_min + dx, x_max + dx)
-            self.current_ax.set_ylim(y_min + dy, y_max + dy)
-            self.pan_start = (event.xdata, event.ydata)
-
-            self.canvas.draw()
+    # def on_pan_press(self, event):
+    #     """
+    #     Start panning when the mouse is pressed.
+    #     """
+    #     if event.inaxes in [self.axs[0], self.axs[1]]:
+    #         self.is_panning = True
+    #         self.pan_start = (event.xdata, event.ydata)
+    #         self.current_ax = event.inaxes
+    #
+    # def on_pan_release(self, event):
+    #     """
+    #     Stop panning when the mouse is released.
+    #     """
+    #     self.is_panning = False
+    #     self.pan_start = None
+    #     self.current_ax = None
+    #
+    # def on_pan_motion(self, event):
+    #     """
+    #     Perform panning when the mouse is dragged.
+    #     """
+    #     if self.is_panning and self.current_ax and event.xdata and event.ydata:
+    #         x_start, y_start = self.pan_start
+    #         dx = x_start - event.xdata
+    #         dy = y_start - event.ydata
+    #
+    #         x_min, x_max = self.current_ax.get_xlim()
+    #         y_min, y_max = self.current_ax.get_ylim()
+    #
+    #         self.current_ax.set_xlim(x_min + dx, x_max + dx)
+    #         self.current_ax.set_ylim(y_min + dy, y_max + dy)
+    #         self.pan_start = (event.xdata, event.ydata)
+    #
+    #         self.canvas.draw()
 
     def delete_original_point(self):
         selected_index = self.original_points_listbox.curselection()
@@ -243,18 +251,32 @@ class ImageRegistrationTool:
             self.redraw_points()
 
     def redraw_points(self):
+        # Store current zoom/pan limits
+        xlim0 = self.axs[0].get_xlim()
+        ylim0 = self.axs[0].get_ylim()
+        xlim1 = self.axs[1].get_xlim()
+        ylim1 = self.axs[1].get_ylim()
+
+        # Redraw ax[0]
         self.axs[0].clear()
         self.axs[0].imshow(self.original_image, cmap='gray')
         self.axs[0].set_title("Original Image")
+        # Restore old limits
+        self.axs[0].set_xlim(xlim0)
+        self.axs[0].set_ylim(ylim0)
 
+        # Redraw ax[1]
         self.axs[1].clear()
         self.axs[1].imshow(self.transformed_image, cmap='gray')
         self.axs[1].set_title("Transformed Image")
+        # Restore old limits
+        self.axs[1].set_xlim(xlim1)
+        self.axs[1].set_ylim(ylim1)
 
+        # Re-plot your scatter points
         for i, (x, y) in enumerate(self.fixed_points):
             self.axs[0].scatter(x, y, color='red', s=30)
             self.axs[0].text(x + 5, y, f"{i + 1}", color='red', fontsize=10)
-
         for i, (x, y) in enumerate(self.moving_points):
             self.axs[1].scatter(x, y, color='blue', s=30)
             self.axs[1].text(x + 5, y, f"{i + 1}", color='blue', fontsize=10)
