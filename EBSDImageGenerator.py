@@ -1,4 +1,6 @@
 import os
+import warnings
+
 import cv2
 import numpy as np
 import pandas as pd
@@ -42,8 +44,27 @@ class EBSDImageGenerator:
         nrows = int(self.header.get('NROWS', 0))
         if 5 not in self.data.columns:
             raise ValueError("Column 6 (IQ values) not found in data")
-        if len(self.data[5]) != nrows * ncols_odd:
-            raise ValueError("Data size mismatch: IQ values do not match specified grid dimensions.")
+
+        expected_size = nrows * ncols_odd
+        current_size = len(self.data[5])
+
+        if current_size < expected_size:
+            nrows=nrows-1
+            self.header["NROWS"]=nrows
+            print(f"warning!!! I am reducing the rows from {nrows+1} to {nrows}")
+            assert nrows*ncols_odd ==  current_size, "not matching even when rows are reduced by 1 !!!"
+
+        elif current_size != expected_size:
+            warnings.warn(
+                f"Data size mismatch: IQ values do not match specified grid dimensions. "
+                f"expected: {expected_size} got: {current_size}"
+            )
+        else:
+            print (" Data frame size matches with the ang data rows.!!! ALL oK.")
+        # if len(self.data[5]) != nrows * ncols_odd:
+        #     #raise ValueError(f"Data size mismatch: IQ values do not match specified grid dimensions. expected : {nrows * ncols_odd} got : {self.data[5]}")
+        #     warnings.warn(f"Data size mismatch: IQ values do not match specified grid dimensions. expected : {nrows * ncols_odd} got : {self.data[5]}")
+
         self.image =Image.fromarray(self.data[5].values.reshape(nrows, ncols_odd))
         print("EBSD IQ image generated successfully.")
 
