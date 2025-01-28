@@ -9,7 +9,7 @@ from skimage.io import imread
 from skimage.transform import AffineTransform, warp
 from skimage.measure import ransac
 import EBSDImageGenerator
-
+import pandas as pd
 # GUI Class
 class ImageRegistrationTool:
     def __init__(self, root):
@@ -179,6 +179,7 @@ class ImageRegistrationTool:
                     output_folder = os.path.dirname(file_path)
                     ebsd_gen = EBSDImageGenerator.EBSDImageGenerator(file_path, output_folder)
                     self.original_image = np.array(ebsd_gen.image)
+                    #self.axs[0].imshow(self.original_image, cmap='gray', vmin=2254 , vmax=19707)
                     self.axs[0].imshow(self.original_image, cmap='gray')
                     self.canvas.draw()
                     self.log("Loaded EBSD Image.")
@@ -190,11 +191,36 @@ class ImageRegistrationTool:
                 self.canvas.draw()
                 self.log("Loaded Original Image.")
 
+    def load_lrs_csv(self,csv_file):
+        """
+        Reads a CSV file and plots MaxIntensity values as an image.
+
+        Parameters:
+        ----------
+        csv_file : str
+            Path to the CSV file containing columns (X, Y, WaveNumber, MaxIntensity).
+        """
+        # Load the CSV file
+        df = pd.read_csv(csv_file, delimiter=",")  # Use ',' if not tab-separated
+
+        # Pivot to create a 2D grid of intensity values
+        intensity_matrix = df.pivot(index='Y', columns='X', values='MaxIntensity').to_numpy()
+        waveNumber_matrix = df.pivot(index='Y', columns='X', values='WaveNumber').to_numpy()
+        shift_matrix = df.pivot(index='Y', columns='X', values='shift').to_numpy()
+        self.lrs_max = np.max(intensity_matrix)
+        self.raw_lrs_intensity_matrix=intensity_matrix
+        self.raw_lrs_waveNumber_matrix=waveNumber_matrix
+        self.raw_lrs_shift_matrix=shift_matrix
+
+        return intensity_matrix
+
+
     def load_transformed_image(self):
         file_path = filedialog.askopenfilename()
         if file_path:
-            self.transformed_image = np.array(imread(file_path, as_gray=True))
-            self.axs[1].imshow(self.transformed_image, cmap='gray')
+            #self.transformed_image = np.array(imread(file_path, as_gray=True))
+            self.transformed_image = np.array(self.load_lrs_csv(file_path))
+            self.axs[1].imshow(self.transformed_image, cmap='gray', vmin = 500, vmax = 5000)
             self.canvas.draw()
             self.log("Loaded Transformed Image.")
 
@@ -205,6 +231,11 @@ class ImageRegistrationTool:
 
         try:
             self.registered_image = warp(self.transformed_image, transform.inverse, output_shape=self.original_image.shape)
+            self.registed_lrs_intensity_matrix = warp(self.raw_lrs_intensity_matrix, transform.inverse, output_shape=self.original_image.shape)
+            self.registed_lrs_waveNumber_matrix = warp(self.raw_lrs_waveNumber_matrix, transform.inverse, output_shape=self.original_image.shape)
+            self.registed_lrs_shift_matrix = warp(self.raw_lrs_shift_matrix, transform.inverse, output_shape=self.original_image.shape)
+
+
             self.axs[2].imshow(self.registered_image, cmap='gray')
             self.axs[3].imshow(0.5 * self.original_image + 0.5 * self.registered_image, cmap='gray')
             self.canvas.draw()
@@ -216,6 +247,19 @@ class ImageRegistrationTool:
         try:
             output_folder = os.path.dirname(self.original_image_path)
             output_path = os.path.join(output_folder, "registeredLRSImage.png")
+            output_path_lrs_intesity = os.path.join(output_folder, "registeredLrsIntensity.csv")
+            output_path_lrs_waveNumber = os.path.join(output_folder, "RegistredLrs_waveNumber.csv")
+            output_path_lrs_shift = os.path.join(output_folder, "Registred_registeredLrsShift.csv")
+            #output_path_lrs_data = os.path.join(output_folder, "registeredLrs.csv")
+            #lrs_out_data = self.lrs_max*self.registered_image
+            lrs_out_intensity = self.registered_image
+            lrs_out_waveNumber = self.registed_lrs_waveNumber_matrix
+            lrs_out_shift = self.registed_lrs_shift_matrix
+            np.savetxt(output_path_lrs_intesity, lrs_out_intensity, delimiter=",",
+                       header=f"{lrs_out_intensity.shape[0]},{lrs_out_intensity.shape[1]}", comments="",  fmt="%.2f")
+            np.savetxt(output_path_lrs_waveNumber, lrs_out_waveNumber, delimiter=",", header=f"{lrs_out_intensity.shape[0]},{lrs_out_intensity.shape[1]}", comments="",  fmt="%.2f")
+            np.savetxt(output_path_lrs_shift, lrs_out_shift, delimiter=",", header=f"{lrs_out_intensity.shape[0]},{lrs_out_intensity.shape[1]}", comments="",  fmt="%.2f")
+
             cv2.imwrite(output_path, (self.registered_image * 255).astype(np.uint8))
             self.log(f"Registered image saved as: {output_path}")
         except Exception as e:
