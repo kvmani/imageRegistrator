@@ -190,24 +190,44 @@ class ImageRegistrationTool:
     # ----------------------------------------------------------------------
     # Contrast Sliders
     # ----------------------------------------------------------------------
+    @staticmethod
+    def normalize_image(image, orig_dtype):
+        """
+        Normalize the adjusted image for display.
+
+        For integer images (e.g. uint8): clip values to [0, 255] and convert to uint8.
+        For float images: clip values to [0, 1].
+
+        Parameters:
+            image (np.ndarray): The adjusted image (typically in float32).
+            orig_dtype (dtype): The original data type of the image.
+
+        Returns:
+            np.ndarray: The normalized image ready for display.
+        """
+        if np.issubdtype(orig_dtype, np.integer):
+            # Clip to 0-255 and convert back to uint8.
+            return np.clip(image, 0, 255).astype(np.uint8)
+        elif np.issubdtype(orig_dtype, np.floating):
+            # Clip to 0-1 for float images.
+            return np.clip(image, 0, 1)
+        else:
+            # Fallback: no normalization.
+            return image
+
+    # In your ImageRegistrationTool class:
+
     def update_contrast_ebsd(self, value):
         """
         Adjusts the contrast of the EBSD image (axs[0]) based on slider.
         """
         if self.original_image is not None:
             contrast_factor = float(value)
+            # Multiply the original image (converted to float32) by the contrast factor.
             adjusted_image = self.original_image.astype(np.float32) * contrast_factor
-            # Check the data type to decide on proper scaling
-            # if np.issubdtype(self.original_image.dtype, np.integer):
-            #     # For integer types (like uint8) assume 0-255 range
-            #     adjusted_image = np.clip(
-            #         self.original_image.astype(np.float32) * contrast_factor, 0, 255
-            #     ).astype(np.uint8)
-            # else:
-            #     # For float images assume they are in the range [0,1]
-            #     adjusted_image = np.clip(
-            #         self.original_image * contrast_factor, 0, 1
-            #     )
+            # Normalize based on the original data type.
+            adjusted_image = self.normalize_image(adjusted_image,self.original_image.dtype)
+            print(f"EBSD contrast updated: {contrast_factor}")
             self.axs[0].imshow(adjusted_image, cmap='gray')
             self.canvas.draw()
 
@@ -218,20 +238,12 @@ class ImageRegistrationTool:
         """
         if self.lrs_image_original is not None:
             contrast_factor = float(value)
+            # Multiply the original LRS image (converted to float32) by the contrast factor.
             adjusted_image = self.lrs_image_original.astype(np.float32) * contrast_factor
-            # Check the data type to decide on proper scaling
-            # if np.issubdtype(self.lrs_image_original.dtype, np.integer):
-            #     # For integer data, we do a 0-255 clip
-            #     temp = self.lrs_image_original.astype(np.float32) * contrast_factor
-            #     adjusted_image = np.clip(temp, 0, 255).astype(np.uint8)
-            # else:
-            #     # For float data, assume [0,1] range
-            #     adjusted_image = np.clip(self.lrs_image_original * contrast_factor, -255, 255)
-
-            # Update the displayed LRS image
-            #self.transformed_image = adjusted_image
-            print(f"redrawing the LRS image as slider is moved to {contrast_factor}")
-            self.axs[1].imshow(adjusted_image, cmap='gray',)
+            # Normalize based on the original data type.
+            adjusted_image = self.normalize_image(adjusted_image, self.lrs_image_original.dtype)
+            print(f"LRS contrast updated: {contrast_factor}")
+            self.axs[1].imshow(adjusted_image, cmap='gray')
             self.canvas.draw()
 
     # ----------------------------------------------------------------------
