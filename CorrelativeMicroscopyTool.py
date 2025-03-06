@@ -70,12 +70,12 @@ class ImageRegistrationTool:
         tk.Label(lrs_slider_frame, text="LRS Contrast: ").pack(side=tk.LEFT)
         self.contrast_slider_lrs = tk.Scale(
             lrs_slider_frame,
-            from_=0.1, to=5.0, resolution=0.2,
+            from_=0.5, to=5.0, resolution=0.2,
             orient="horizontal",
             command=self.update_contrast_lrs,
             length=200
         )
-        self.contrast_slider_lrs.set(1.0)
+        self.contrast_slider_lrs.set(2.5)
         self.contrast_slider_lrs.pack(side=tk.LEFT)
 
         # ========== Row 2: Image frame (4 subplots) ==========
@@ -196,17 +196,18 @@ class ImageRegistrationTool:
         """
         if self.original_image is not None:
             contrast_factor = float(value)
+            adjusted_image = self.original_image.astype(np.float32) * contrast_factor
             # Check the data type to decide on proper scaling
-            if np.issubdtype(self.original_image.dtype, np.integer):
-                # For integer types (like uint8) assume 0-255 range
-                adjusted_image = np.clip(
-                    self.original_image.astype(np.float32) * contrast_factor, 0, 255
-                ).astype(np.uint8)
-            else:
-                # For float images assume they are in the range [0,1]
-                adjusted_image = np.clip(
-                    self.original_image * contrast_factor, 0, 1
-                )
+            # if np.issubdtype(self.original_image.dtype, np.integer):
+            #     # For integer types (like uint8) assume 0-255 range
+            #     adjusted_image = np.clip(
+            #         self.original_image.astype(np.float32) * contrast_factor, 0, 255
+            #     ).astype(np.uint8)
+            # else:
+            #     # For float images assume they are in the range [0,1]
+            #     adjusted_image = np.clip(
+            #         self.original_image * contrast_factor, 0, 1
+            #     )
             self.axs[0].imshow(adjusted_image, cmap='gray')
             self.canvas.draw()
 
@@ -228,7 +229,8 @@ class ImageRegistrationTool:
             #     adjusted_image = np.clip(self.lrs_image_original * contrast_factor, -255, 255)
 
             # Update the displayed LRS image
-            self.transformed_image = adjusted_image
+            #self.transformed_image = adjusted_image
+            print(f"redrawing the LRS image as slider is moved to {contrast_factor}")
             self.axs[1].imshow(adjusted_image, cmap='gray',)
             self.canvas.draw()
 
@@ -319,7 +321,7 @@ class ImageRegistrationTool:
             self.transformed_image = self.lrs_image_original.copy()
 
             # Show LRS in subplot[1]
-            self.axs[1].imshow(self.transformed_image, cmap='gray', vmin=500, vmax=5000)
+            self.axs[1].imshow(self.transformed_image, cmap='gray')
             self.canvas.draw()
             self.log("Loaded Transformed Image.")
 
