@@ -191,31 +191,58 @@ class ImageRegistrationTool:
     # Contrast Sliders
     # ----------------------------------------------------------------------
     @staticmethod
-    def normalize_image(image, orig_dtype):
+    def normalize_image(image, orig_dtype,contrast_factor):
         """
-        Normalize the adjusted image for display.
+        Normalizes an adjusted image for display.
 
-        For integer images (e.g. uint8): clip values to [0, 255] and convert to uint8.
-        For float images: clip values to [0, 1].
+        For integer images (e.g. uint8, int16, etc.):
+          - Computes the current min and max of the image.
+          - Linearly scales the image data so that the minimum becomes 0 and the maximum becomes 255.
+          - Clips any values outside [0, 255] and converts to uint8.
+
+        For float images:
+          - Computes the current min and max of the image.
+          - Linearly scales the image data so that the minimum becomes 0 and the maximum becomes 1.
+          - Clips any values outside [0, 1] and returns a float32 array.
 
         Parameters:
-            image (np.ndarray): The adjusted image (typically in float32).
+            image (np.ndarray): The contrast-adjusted image (should be float32 for arithmetic).
             orig_dtype (dtype): The original data type of the image.
 
         Returns:
             np.ndarray: The normalized image ready for display.
         """
-        if np.issubdtype(orig_dtype, np.integer):
-            # Clip to 0-255 and convert back to uint8.
-            return np.clip(image, 0, 255).astype(np.uint8)
-        elif np.issubdtype(orig_dtype, np.floating):
-            # Clip to 0-1 for float images.
-            return np.clip(image, 0, 1)
-        else:
-            # Fallback: no normalization.
-            return image
 
-    # In your ImageRegistrationTool class:
+        print(f"before adusting : min: {image.min()}, max: {image.max()}, mean: {image.mean()}")
+        if image is None:
+            return None
+
+        im_min = image.min()
+        im_max = image.max()
+
+        # Avoid division by zero if the image is constant.
+        if im_max == im_min:
+            scaled = np.zeros_like(image)
+        else:
+            scaled = (image - im_min) / (im_max - im_min)
+
+        if np.issubdtype(orig_dtype, np.integer):
+            # Scale to full 0-255 range and convert to uint8.
+            scaled = scaled * 255.0
+            scaled = scaled.astype(np.float32) * contrast_factor
+            scaled = np.clip(scaled, 0, 255).astype(np.uint8)
+            #return scaled.astype(np.uint8)
+        elif np.issubdtype(orig_dtype, np.floating):
+            # Scale to full 0-1 range.
+            scaled = scaled.astype(np.float32) * contrast_factor
+            scaled = np.clip(scaled, 0, 1)
+            #return scaled.astype(np.float32)
+        adjusted = scaled
+        print(f"after adusting : min: {adjusted.min()}, max: {adjusted.max()}, mean: {adjusted.mean()}")
+        return adjusted
+
+
+    # Inside your ImageRegistrationTool class:
 
     def update_contrast_ebsd(self, value):
         """
@@ -223,10 +250,10 @@ class ImageRegistrationTool:
         """
         if self.original_image is not None:
             contrast_factor = float(value)
-            # Multiply the original image (converted to float32) by the contrast factor.
+            # Multiply the original image by the contrast factor.
             adjusted_image = self.original_image.astype(np.float32) * contrast_factor
-            # Normalize based on the original data type.
-            adjusted_image = self.normalize_image(adjusted_image,self.original_image.dtype)
+            # Normalize the adjusted image to the proper display range.
+            adjusted_image = self.normalize_image(self.original_image, self.original_image.dtype,contrast_factor)
             print(f"EBSD contrast updated: {contrast_factor}")
             self.axs[0].imshow(adjusted_image, cmap='gray')
             self.canvas.draw()
@@ -238,10 +265,10 @@ class ImageRegistrationTool:
         """
         if self.lrs_image_original is not None:
             contrast_factor = float(value)
-            # Multiply the original LRS image (converted to float32) by the contrast factor.
+            # Multiply the original LRS image by the contrast factor.
             adjusted_image = self.lrs_image_original.astype(np.float32) * contrast_factor
-            # Normalize based on the original data type.
-            adjusted_image = self.normalize_image(adjusted_image, self.lrs_image_original.dtype)
+            # Normalize the adjusted image.
+            adjusted_image = self.normalize_image(self.lrs_image_original, self.lrs_image_original.dtype,contrast_factor)
             print(f"LRS contrast updated: {contrast_factor}")
             self.axs[1].imshow(adjusted_image, cmap='gray')
             self.canvas.draw()
